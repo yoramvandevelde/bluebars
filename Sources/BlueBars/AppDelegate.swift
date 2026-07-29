@@ -22,6 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         refreshUI()
+        monitor.refresh()
 
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             self?.monitor.refresh()
@@ -29,7 +30,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func refreshUI() {
-        statusItem.button?.image = compositeIcon(for: selectedDeviceNames)
+        let visibleSelected = selectedDeviceNames.filter { monitor.availableDeviceNames.contains($0) }
+        statusItem.button?.image = compositeIcon(for: visibleSelected)
         statusItem.menu = buildMenu()
     }
 

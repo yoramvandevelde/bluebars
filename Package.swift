@@ -10,7 +10,6 @@ let package = Package(
             path: "Sources/BlueBars",
             linkerSettings: [
                 .linkedFramework("CoreBluetooth"),
-                .linkedFramework("IOBluetooth"),
                 .linkedFramework("AppKit"),
                 .linkedFramework("ServiceManagement")
             ]

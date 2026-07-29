@@ -1,0 +1,32 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build release binary
+        run: swift build -c release
+
+      - name: Assemble app bundle
+        run: |
+          BIN_PATH=$(swift build -c release --show-bin-path)
+          mkdir -p BlueBars.app/Contents/MacOS
+          cp "$BIN_PATH/BlueBars" BlueBars.app/Contents/MacOS/BlueBars
+          codesign --force --deep --sign - BlueBars.app
+
+      - name: Zip app bundle
+        run: ditto -c -k --sequesterRsrc --keepParent BlueBars.app "BlueBars-${{ github.ref_name }}.zip"
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: BlueBars-${{ github.ref_name }}.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

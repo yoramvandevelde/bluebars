@@ -29,3 +29,10 @@ Ad-hoc signing (`codesign -s -`) generates a new identity every time the binary 
 Create one via Keychain Access > Certificate Assistant > Create a Certificate (Identity Type: **Self Signed Root**, Certificate Type: **Code Signing**), then set it to "Always Trust" for code signing. Good walkthrough: [How to create a code signing certificate in macOS](https://www.simplified.guide/macos/keychain-cert-code-signing-create).
 
 If you rename or resign under a new identity, macOS will treat the app as new and ask for permissions again — that's expected, just re-approve them in System Settings > Privacy & Security.
+
+## Downloading a release
+
+Push a tag like `v1.0.0` and GitHub Actions builds and attaches a zipped `BlueBars.app` to a new release. That build is ad-hoc signed (no paid Apple Developer account involved), so macOS Gatekeeper will flag it as coming from an unidentified developer on first launch. To open it anyway:
+
+- Right-click the app > **Open** > confirm **Open**, or
+- Terminal: `xattr -cr BlueBars.app` to drop the quarantine flag, then open normally.

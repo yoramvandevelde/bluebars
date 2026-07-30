@@ -41,7 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let deviceNames = monitor.availableDeviceNames
         if deviceNames.isEmpty {
-            let item = NSMenuItem(title: "Geen Bluetooth devices gevonden", action: nil, keyEquivalent: "")
+            let item = NSMenuItem(title: "No Bluetooth devices found", action: nil, keyEquivalent: "")
             item.isEnabled = false
             menu.addItem(item)
         } else {
@@ -92,10 +92,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             log("toggleLaunchAtLogin failed: \(error.localizedDescription)")
         }
         refreshUI()
-    }
-
-    private func log(_ text: String) {
-        NSLog("BlueBars: %@", text)
     }
 
     @objc private func quit() {

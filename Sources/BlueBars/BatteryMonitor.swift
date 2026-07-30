@@ -16,7 +16,7 @@ final class BatteryMonitor: NSObject, CBCentralManagerDelegate, CBPeripheralDele
 
     private let queryQueue = DispatchQueue(label: "BlueBars.deviceQuery")
     private var central: CBCentralManager!
-    private var nudgedPeripherals: [CBPeripheral] = []
+    private var nudgedPeripherals: Set<CBPeripheral> = []
     private var lastNudge: [String: Date] = [:]
 
     private(set) var availableDeviceNames: [String] = []
@@ -68,10 +68,19 @@ final class BatteryMonitor: NSObject, CBCentralManagerDelegate, CBPeripheralDele
         let data = outputPipe.fileHandleForReading.readDataToEndOfFile()
         task.waitUntilExit()
 
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let root = (json["SPBluetoothDataType"] as? [[String: Any]])?.first,
-              let connected = root["device_connected"] as? [[String: Any]] else {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return ([], [:])
+        }
+
+        // The expected shape (SPBluetoothDataType -> [0] -> device_connected ->
+        // [{ name: { device_batteryLevelMain: "75%" } }]) is an undocumented,
+        // Apple-internal plist layout that isn't guaranteed stable across macOS
+        // releases. If it doesn't match, fall back to scanning the whole tree
+        // for device_batteryLevelMain entries rather than reporting nothing.
+        guard let root = (json["SPBluetoothDataType"] as? [[String: Any]])?.first,
+              let connected = root["device_connected"] as? [[String: Any]] else {
+            let battery = recursivelyFindBatteryLevels(in: json)
+            return (battery.keys.sorted(), battery)
         }
 
         var names: [String] = []
@@ -87,6 +96,25 @@ final class BatteryMonitor: NSObject, CBCentralManagerDelegate, CBPeripheralDele
         return (names.sorted(), battery)
     }
 
+    private func recursivelyFindBatteryLevels(in value: Any) -> [String: Int] {
+        var result: [String: Int] = [:]
+        if let dict = value as? [String: Any] {
+            for (key, val) in dict {
+                if let props = val as? [String: Any],
+                   let level = props["device_batteryLevelMain"] as? String,
+                   let percent = Int(level.filter(\.isNumber)) {
+                    result[key] = percent
+                }
+                result.merge(recursivelyFindBatteryLevels(in: val)) { current, _ in current }
+            }
+        } else if let array = value as? [Any] {
+            for item in array {
+                result.merge(recursivelyFindBatteryLevels(in: item)) { current, _ in current }
+            }
+        }
+        return result
+    }
+
     // BLE devices' battery level doesn't reliably show up in system_profiler's
     // output (macOS's own cache for it isn't consistently refreshed), so read
     // the standard Battery Service ourselves and use that value directly (see
@@ -94,6 +122,7 @@ final class BatteryMonitor: NSObject, CBCentralManagerDelegate, CBPeripheralDele
     // radio traffic rather than continuous polling. Classic-only devices (no
     // BLE, e.g. HFP headsets) never match here and rely on system_profiler.
     private func nudgeStaleBLEDevices(names: [String], battery: [String: Int]) {
+        lastNudge = lastNudge.filter { names.contains($0.key) }
         guard central.state == .poweredOn, !names.isEmpty else { return }
 
         let now = Date()
@@ -107,7 +136,7 @@ final class BatteryMonitor: NSObject, CBCentralManagerDelegate, CBPeripheralDele
         for peripheral in peripherals {
             guard let name = peripheral.name, due.contains(name) else { continue }
             lastNudge[name] = now
-            nudgedPeripherals.append(peripheral)
+            nudgedPeripherals.insert(peripheral)
             peripheral.delegate = self
             if peripheral.state != .connected {
                 central.connect(peripheral, options: nil)
@@ -132,12 +161,16 @@ final class BatteryMonitor: NSObject, CBCentralManagerDelegate, CBPeripheralDele
     }
 
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
-        nudgedPeripherals.removeAll { $0 === peripheral }
+        nudgedPeripherals.remove(peripheral)
+    }
+
+    func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
+        nudgedPeripherals.remove(peripheral)
     }
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         guard error == nil else {
-            nudgedPeripherals.removeAll { $0 === peripheral }
+            nudgedPeripherals.remove(peripheral)
             return
         }
         for service in peripheral.services ?? [] where service.uuid == batteryServiceUUID {
@@ -147,36 +180,23 @@ final class BatteryMonitor: NSObject, CBCentralManagerDelegate, CBPeripheralDele
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
         guard error == nil else {
-            nudgedPeripherals.removeAll { $0 === peripheral }
+            nudgedPeripherals.remove(peripheral)
             return
         }
         for characteristic in service.characteristics ?? [] where characteristic.uuid == batteryLevelUUID {
             peripheral.readValue(for: characteristic)
+            peripheral.setNotifyValue(true, for: characteristic)
         }
     }
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
         guard characteristic.uuid == batteryLevelUUID else { return }
-        nudgedPeripherals.removeAll { $0 === peripheral }
+        nudgedPeripherals.remove(peripheral)
         // Our own GATT read never reaches whatever cache system_profiler mirrors
         // (verified: reading here doesn't make system_profiler's output change),
         // so use this value directly instead of hoping system_profiler picks it up.
         guard error == nil, let byte = characteristic.value?.first, let name = peripheral.name else { return }
         batteryByName[name] = Int(byte)
         onUpdate?()
-    }
-
-    private func log(_ text: String) {
-        let line = "[\(Date())] \(text)\n"
-        guard let data = line.data(using: .utf8) else { return }
-        let path = "/tmp/bluebars_debug.log"
-        if !FileManager.default.fileExists(atPath: path) {
-            FileManager.default.createFile(atPath: path, contents: nil)
-        }
-        if let handle = FileHandle(forWritingAtPath: path) {
-            handle.seekToEndOfFile()
-            handle.write(data)
-            handle.closeFile()
-        }
     }
 }

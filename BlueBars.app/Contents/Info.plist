@@ -8,6 +8,8 @@
     <string>BlueBars</string>
     <key>CFBundleExecutable</key>
     <string>BlueBars</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>

@@ -1,5 +1,6 @@
 import CoreBluetooth
 import Foundation
+import IOBluetooth
 
 final class BatteryMonitor: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
 
@@ -7,6 +8,21 @@ final class BatteryMonitor: NSObject, CBCentralManagerDelegate, CBPeripheralDele
 
     private let batteryServiceUUID = CBUUID(string: "180F")
     private let batteryLevelUUID = CBUUID(string: "2A19")
+
+    // Not in the public IOBluetoothDevice header, but backs the same battery
+    // percentage System Settings shows for classic (non-BLE) accessories.
+    // Used only as a fallback for devices system_profiler reports no battery
+    // for at all (e.g. HFP-only earbuds/headsets, some HID keyboards): these
+    // keys default to 0 rather than -1 when unset, which previously caused
+    // readings to spuriously reset to 0% (see 6e30bbe) — so 0 is treated here
+    // as "no reading", not a real value. A device genuinely at 0% has already
+    // disconnected.
+    private let classicBatteryKeys = [
+        "batteryPercentSingle",
+        "batteryPercentCombined",
+        "batteryPercentLeft",
+        "headsetBatteryPercent"
+    ]
 
     // How often to poke a BLE peripheral's Battery Service to refresh macOS's
     // cached value: quickly for a device that just reconnected and has no
@@ -80,7 +96,7 @@ final class BatteryMonitor: NSObject, CBCentralManagerDelegate, CBPeripheralDele
         guard let root = (json["SPBluetoothDataType"] as? [[String: Any]])?.first,
               let connected = root["device_connected"] as? [[String: Any]] else {
             let battery = recursivelyFindBatteryLevels(in: json)
-            return (battery.keys.sorted(), battery)
+            return (battery.keys.sorted(), applyClassicFallback(names: Array(battery.keys), battery: battery))
         }
 
         var names: [String] = []
@@ -93,7 +109,31 @@ final class BatteryMonitor: NSObject, CBCentralManagerDelegate, CBPeripheralDele
                 battery[name] = percent
             }
         }
-        return (names.sorted(), battery)
+        return (names.sorted(), applyClassicFallback(names: names, battery: battery))
+    }
+
+    private func applyClassicFallback(names: [String], battery: [String: Int]) -> [String: Int] {
+        let missing = names.filter { battery[$0] == nil }
+        guard !missing.isEmpty, let devices = IOBluetoothDevice.pairedDevices() as? [IOBluetoothDevice] else {
+            return battery
+        }
+        var result = battery
+        for device in devices {
+            guard let name = device.name, missing.contains(name), device.isConnected() else { continue }
+            if let percent = classicBatteryPercent(for: device) {
+                result[name] = percent
+            }
+        }
+        return result
+    }
+
+    private func classicBatteryPercent(for device: IOBluetoothDevice) -> Int? {
+        for key in classicBatteryKeys {
+            if let number = device.value(forKey: key) as? NSNumber, number.intValue > 0 {
+                return number.intValue
+            }
+        }
+        return nil
     }
 
     private func recursivelyFindBatteryLevels(in value: Any) -> [String: Int] {

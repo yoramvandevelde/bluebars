@@ -32,7 +32,7 @@ If you rename or resign under a new identity, macOS will treat the app as new an
 
 ## Downloading a release
 
-Push a tag like `v1.0.0` and GitHub Actions builds and attaches a zipped `BlueBars.app` to a new release. That build is ad-hoc signed (no paid Apple Developer account involved), so macOS Gatekeeper will flag it as coming from an unidentified developer on first launch. To open it anyway:
+MacOS Gatekeeper will flag this application as coming from an unidentified developer on first launch. This is because I am not paying Apple to have me run my own apps. To open it anyway:
 
 - Right-click the app > **Open** > confirm **Open**, or
 - Terminal: `xattr -cr BlueBars.app` to drop the quarantine flag, then open normally.

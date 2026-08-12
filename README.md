@@ -1,6 +1,6 @@
 # BlueBars 
 
-Small MacOS menubar tool to show the battery status of chosen devices. It is **really** simple and works a charm.
+Small MacOS menubar tool to show the battery status of connected bluetooth devices. It is **really** simple and works a charm.
 
 ![image](Screenshot.png)
 
